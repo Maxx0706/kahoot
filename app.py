@@ -1,72 +1,76 @@
 import streamlit as st
 import asyncio
-import os
-import subprocess
-import sys
 import random
 from playwright.async_api import async_playwright
-# --- NEW IMPORT SYNTAX ---
 from playwright_stealth import Stealth
 
-# --- 1. SETUP ---
+# --- 1. BOOTSTRAP ---
 @st.cache_resource
-def install_playwright():
-    try:
-        # We need to install the browser binaries
-        subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
-        return True
-    except Exception as e:
-        st.error(f"Installation failed: {e}")
-        return False
+def install_pw():
+    import subprocess, sys
+    subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+    return True
 
-is_ready = install_playwright()
+ready = install_pw()
 
-# --- 2. UI ---
-st.set_page_config(page_title="Kahoot Flash", page_icon="⚡")
-st.title("⚡ Kahoot Flash Joiner")
-
-with st.sidebar:
-    pin = st.text_input("Game PIN")
-    name = st.text_input("Username", value="Player")
-    count = st.slider("Bots", 1, 10, 5)
-
-# --- 3. THE ENGINE ---
-async def join_bot(i, pin, base_name):
-    # Recommended usage for playwright-stealth 2.0.0:
-    # We apply stealth to the entire playwright instance using the 'use_async' method
+# --- 2. THE HUMAN EMULATOR ---
+async def join_as_iphone(i, pin, base_name):
+    """Bypasses ghosting by mimicking a real iPhone on a cellular network"""
     async with Stealth().use_async(async_playwright()) as p:
-        browser = await p.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage", "--single-process"]
+        # LAUNCH: Use unique user data dirs to prevent 'clone' detection
+        browser = await p.chromium.launch(headless=True, args=[
+            "--no-sandbox", 
+            "--disable-blink-features=AutomationControlled"
+        ])
+        
+        # MASK: Use a real iPhone 15 Pro Max profile
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1",
+            viewport={'width': 430, 'height': 932},
+            device_scale_factor=3,
+            is_mobile=True,
+            has_touch=True
         )
         
-        # All pages created from this 'p' instance will have stealth applied automatically
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
-        )
         page = await context.new_page()
         
         try:
-            # Join Logic
-            await page.goto(f"https://kahoot.it/?pin={pin}", wait_until="domcontentloaded", timeout=20000)
-            await page.wait_for_selector("#nickname", timeout=10000)
-            await page.fill("#nickname", f"{base_name}{i}{random.randint(10,99)}")
+            # 1. Random delay so they don't hit the server at the exact same millisecond
+            await asyncio.sleep(random.uniform(1, 4))
+            
+            # 2. Go to Kahoot with a 'Referer' header (looks like they came from Google)
+            await page.set_extra_http_headers({"Referer": "https://www.google.com/"})
+            await page.goto(f"https://kahoot.it/?pin={pin}", wait_until="networkidle")
+            
+            # 3. HUMAN TYPING: Never use .fill(), it's too fast
+            nickname_box = await page.wait_for_selector("#nickname", timeout=10000)
+            await nickname_box.click()
+            
+            full_name = f"{base_name}{i}"
+            for char in full_name:
+                await page.keyboard.type(char, delay=random.randint(100, 250))
+                
+            await asyncio.sleep(random.uniform(0.5, 1.2))
             await page.keyboard.press("Enter")
             
-            # Stay active
-            await asyncio.sleep(600)
-        except:
+            # 4. Keep alive
+            await asyncio.sleep(300)
+        except Exception:
             pass
         finally:
             await browser.close()
 
-async def run_attack():
-    st.info(f"🚀 Launching {count} bots...")
-    tasks = [join_bot(i, pin, name) for i in range(1, count + 1)]
-    await asyncio.gather(*tasks)
+# --- 3. UI ---
+st.title("⚡ Ghost-Bypass Joiner")
+pin_input = st.text_input("PIN")
+name_input = st.text_input("Prefix", value="Guest")
+bot_val = st.slider("Bots", 1, 10, 3)
 
-if st.button("START"):
-    if pin and is_ready:
-        asyncio.run(run_attack())
-    else:
-        st.error("Wait for boot or enter PIN.")
+if st.button("LAUNCH"):
+    if pin_input and ready:
+        st.info("🔥 Attempting to bypass shadow-ban...")
+        # Fire them off!
+        loop = asyncio.get_event_loop()
+        for i in range(1, bot_val + 1):
+            loop.create_task(join_as_iphone(i, pin_input, name_input))
+        st.success("Bots dispatched. If they don't appear in 10s, your IP is hard-blocked.")
