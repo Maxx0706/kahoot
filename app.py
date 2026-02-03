@@ -1,46 +1,51 @@
 import streamlit as st
 import asyncio
-from kahoot import client
+import random
+from playwright.async_api import async_playwright
 
-# --- UI SETUP ---
-st.set_page_config(page_title="Lightning Kahoot", page_icon="⚡")
-st.title("⚡ Lightning Kahoot Joiner")
-st.info("This version uses raw API packets (No Browser) for maximum speed.")
+# --- UI ---
+st.set_page_config(page_title="Flash Bot", page_icon="⚡")
+st.title("⚡ Flash Stealth Joiner")
 
-with st.sidebar:
-    pin = st.text_input("Game PIN", placeholder="123456")
-    base_name = st.text_input("Username prefix", value="Bot")
-    bot_count = st.slider("Number of Bots", 1, 50, 20)
+pin = st.sidebar.text_input("Game PIN")
+base_name = st.sidebar.text_input("Username", value="Player")
+bot_count = st.sidebar.slider("Bots", 1, 15, 5)
 
-status_area = st.empty()
-
-# --- BOT LOGIC ---
-def bot_join(bot_id, pin, name):
-    bot = client()
-    # join() is synchronous in this library, so it's very fast
-    bot.join(pin, f"{name}{bot_id}")
-    return bot
-
-def start_attack():
-    status_area.warning(f"🚀 Launching {bot_count} bots...")
-    bots = []
+# --- THE LIGHTNING ENGINE ---
+async def join_sequence(browser, i, pin, name):
+    """A high-speed stealth join"""
+    context = await browser.new_context(
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+    )
+    # This script tricks Kahoot into thinking it's not a bot
+    await context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     
-    for i in range(1, bot_count + 1):
-        try:
-            new_bot = bot_join(i, pin, base_name)
-            bots.append(new_bot)
-            status_area.text(f"✅ Bot {i} joined!")
-        except Exception as e:
-            st.error(f"Bot {i} failed: {e}")
-            break
-            
-    status_area.success(f"🔥 {len(bots)} bots joined the lobby!")
-    # Keep the bots alive
-    st.session_state['active_bots'] = bots
+    page = await context.new_page()
+    # Speed up: Block everything except the logic
+    await page.route("**/*", lambda r: r.abort() if r.request.resource_type in ["image", "font", "media"] else r.continue_())
+    
+    try:
+        await page.goto(f"https://kahoot.it/?pin={pin}", wait_until="commit")
+        await page.wait_for_selector("#nickname", timeout=5000)
+        await page.fill("#nickname", f"{name}{i}{random.randint(10,99)}")
+        await page.keyboard.press("Enter")
+        await asyncio.sleep(60) # Keep them in the lobby
+    except:
+        pass
 
-# --- EXECUTION ---
-if st.button("Launch Lightning Attack"):
+async def launch_attack():
+    async with async_playwright() as p:
+        # 'headless_shell' is the fastest version of Chromium
+        browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-gpu", "--single-process"])
+        
+        # Fire all tasks AT ONCE (Lightning speed)
+        tasks = [join_sequence(browser, i, pin, base_name) for i in range(bot_count)]
+        st.success(f"🔥 Launching {bot_count} bots simultaneously...")
+        await asyncio.gather(*tasks)
+        await browser.close()
+
+if st.button("EXECUTE FLASH JOIN"):
     if pin:
-        start_attack()
+        asyncio.run(launch_attack())
     else:
-        st.error("Enter a PIN!")
+        st.error("PIN Required")
