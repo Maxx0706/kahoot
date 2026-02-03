@@ -1,70 +1,71 @@
 import streamlit as st
 import asyncio
-import random
+import os
+import subprocess
+import sys
 from playwright.async_api import async_playwright
 from playwright_stealth import stealth_async
 
-# --- UI ---
-st.set_page_config(page_title="Flash Joiner", page_icon="⚡")
-st.title("⚡ Flash Stealth Joiner")
+# --- 1. CLEANUP & INSTALL (Fixes the "Oven" Issue) ---
+@st.cache_resource
+def prepare_environment():
+    try:
+        # Kill any zombie chrome processes from previous crashes
+        os.system("pkill -9 chrome || true")
+        os.system("pkill -9 chromium || true")
+        
+        # Install Chromium
+        subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+        return True
+    except Exception as e:
+        st.error(f"Boot error: {e}")
+        return False
 
-with st.sidebar:
-    pin = st.text_input("Game PIN")
-    name = st.text_input("Name", value="Player")
-    count = st.slider("Bots", 1, 10, 5)
-    delay = st.slider("Stagger Delay", 0.1, 2.0, 0.5)
+is_ready = prepare_environment()
 
-# --- THE ENGINE ---
+# --- 2. UI ---
+st.set_page_config(page_title="Final Flash", page_icon="⚡")
+st.title("⚡ Final Flash Joiner")
+
+pin = st.sidebar.text_input("PIN")
+name = st.sidebar.text_input("Name", value="Bot")
+count = st.sidebar.slider("Bots", 1, 8, 4) # Lower count = more stability
+
+# --- 3. THE ENGINE ---
 async def join_bot(browser, i, pin, base_name):
-    # Use unique context to avoid session overlap
     context = await browser.new_context(
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-        viewport={'width': 1280, 'height': 720}
+        user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
     )
-    
     page = await context.new_page()
-    # Apply stealth to this specific page
     await stealth_async(page)
     
     try:
-        # Load Kahoot
-        await page.goto(f"https://kahoot.it/?pin={pin}", wait_until="networkidle")
+        # Speed: Block heavy media
+        await page.route("**/*", lambda r: r.abort() if r.request.resource_type in ["image", "media", "font"] else r.continue_())
         
-        # Look for the input - wait for it to actually be ready
-        nickname_input = await page.wait_for_selector("#nickname", timeout=10000)
-        
-        # Human-like interaction
-        await nickname_input.click()
-        await page.keyboard.type(f"{base_name}{i}", delay=random.randint(50, 150))
+        await page.goto(f"https://kahoot.it/?pin={pin}", wait_until="domcontentloaded", timeout=20000)
+        await page.wait_for_selector("#nickname", timeout=10000)
+        await page.fill("#nickname", f"{base_name}_{i}")
         await page.keyboard.press("Enter")
-        
-        # Keep them in the lobby for 10 minutes
-        await asyncio.sleep(600)
-    except Exception:
+        await asyncio.sleep(300) 
+    except:
         pass
     finally:
         await context.close()
 
-async def run_flash():
+async def run_attack():
     async with async_playwright() as p:
-        # Launch with flags that hide 'automation'
         browser = await p.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--single-process"]
         )
-        
-        tasks = []
-        for i in range(1, count + 1):
-            tasks.append(asyncio.create_task(join_bot(browser, i, pin, name)))
-            # This tiny stagger prevents the "Target Closed" crash
-            await asyncio.sleep(delay)
-            
-        st.success(f"🔥 {count} bots dispatched. Checking lobby...")
+        tasks = [join_bot(browser, i, pin, name) for i in range(1, count + 1)]
+        st.success(f"🚀 Deploying {count} bots...")
         await asyncio.gather(*tasks)
         await browser.close()
 
-if st.button("EXECUTE JOIN"):
-    if pin:
-        asyncio.run(run_flash())
+if st.button("START"):
+    if pin and is_ready:
+        asyncio.run(run_attack())
     else:
-        st.error("PIN needed!")
+        st.error("Check PIN or wait for boot.")
