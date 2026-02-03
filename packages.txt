@@ -2,3 +2,14 @@ libnss3
 libatk-bridge2.0-0
 libgtk-3-0
 libasound2
+libnss3
+libatk-bridge2.0-0
+libgtk-3-0
+libasound2
+libgbm1
+libxcomposite1
+libxdamage1
+libxfixes3
+libxrandr2
+libpango-1.0-0
+libcairo2
